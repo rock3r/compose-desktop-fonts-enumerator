@@ -46,19 +46,19 @@ private fun listFontFamiliesOnWindows(fontFamilyNames: Iterable<String>): List<S
 
     @Suppress("UNCHECKED_CAST")
     val registryMap = (Advapi32Util.registryGetValues(WinReg.HKEY_LOCAL_MACHINE, FONTS_KEY_PATH) as TreeMap<String, String>)
-        .filterValues { it.endsWith(".ttf", ignoreCase = true) || it.endsWith(".otf", ignoreCase = true) }
+        .filterValues {
+            it.endsWith(".ttf", ignoreCase = true) || it.endsWith(".ttc", ignoreCase = true) || it.endsWith(".otf", ignoreCase = true)
+        }
 
     val fontPathByName = mutableMapOf<String, String>()
     for ((name, path) in registryMap.entries) {
-        if (!name.contains(" & ")) {
-            fontPathByName[name.substringBeforeLast(" (")] = path
+        // AWT doesn't know how to handle ttc files correctly — it only ever loads the first font in a ttc.
+        // So, when we find a ttc entry with more than one font defined, we just get the first entry, hoping
+        // that the order is the same as inside the ttc. Not that we have any control over this anyway!
+        if (path.endsWith(".ttc", ignoreCase = true) && name.contains(" & ")) {
+            fontPathByName[name.substringBefore(" & ").trim()] = path
         } else {
-            // This case handles entries where multiple fonts are provided by a single file.
-            // E.g.: Microsoft JhengHei Light & Microsoft JhengHei UI Light -> msjhl.ttc
-            val names = name.substringBeforeLast(" (").split(" & ")
-            for (subName in names) {
-                fontPathByName[subName] = path
-            }
+            fontPathByName[name.substringBeforeLast(" (").trim()] = path
         }
     }
 
@@ -79,10 +79,10 @@ private fun collectIntoSystemFontFamilies(
 
     for (familyName in sortedFontFamilyNames) {
         println("Processing font family: $familyName")
-        val files = filesByFont.filterKeys { font -> familyName.equals(font.family, ignoreCase = true) }
+        val files = filesByFont.filterKeys { font -> familyName.equals(font.getFamily(Locale.ENGLISH), ignoreCase = true) }
 
-        for ((name, _) in files) {
-            filesByFont.remove(name)
+        for ((font, _) in files) {
+            filesByFont.remove(font)
         }
 
         if (files.isEmpty()) {
@@ -91,18 +91,17 @@ private fun collectIntoSystemFontFamilies(
         }
 
         val fileFonts = files.map { (font, file) ->
-            val fontStyle = if (font.isItalic || looksItalic(font.name)) FontStyle.Italic else FontStyle.Normal
+            val fontName = font.getFontName(Locale.ENGLISH)
+            val fontStyle = if (font.isItalic || looksItalic(fontName)) FontStyle.Italic else FontStyle.Normal
             val rawWeight = fontWeightFromTextAttributeValue(font.attributes[TextAttribute.WEIGHT] as Float?)
             val fontWeight = rawWeight ?: inferWeightFromName(
-                font.name.substringAfter(font.family).split(' ', '-')
+                fontName.substringAfter(font.getFamily(Locale.ENGLISH)).split(' ', '-')
                     .map { it.trim().lowercase() }
                     .filter { it.isNotBlank() }
             )
 
             Font(file = file, weight = fontWeight, style = fontStyle) as FileFont
         }
-
-        println("Font files:\n$fileFonts")
 
         fontFamilies += SystemFontFamily(familyName, FontFamily(fileFonts), fileFonts)
     }
