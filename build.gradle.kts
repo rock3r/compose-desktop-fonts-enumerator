@@ -3,6 +3,9 @@ plugins {
     alias(libs.plugins.composeDesktop)
 }
 
+group = "dev.sebastiano"
+version = "0.0.1-SNAPSHOT"
+
 kotlin {
     target {
         compilations.all {
